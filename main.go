@@ -44,7 +44,7 @@ func startHTTTPServer() error {
 func startSSHServer() error {
 	sshPort := ":2222"
 
-	handler := &SSHHandler{}
+	handler := NewSSHHandler()
 	server := ssh.Server{
 		Addr:    sshPort,
 		Handler: handler.handleSSHSession,
@@ -77,17 +77,37 @@ func main() {
 	startHTTTPServer()
 }
 
-type SSHHandler struct{}
+type SSHHandler struct {
+	channels map[string]chan string
+}
+
+func NewSSHHandler() *SSHHandler {
+	return &SSHHandler{
+		channels: make(map[string]chan string),
+	}
+}
 
 func (h *SSHHandler) handleSSHSession(session ssh.Session) {
-	id := shortid.MustGenerate()
-	webhookerURL := "http://webhooker.com/" + id
-	session.Write([]byte(webhookerURL + "\n"))
-
-	respCh := make(chan string)
-	clients.Store(id, respCh)
-
-	for data := range respCh {
-		session.Write([]byte(data + "\n"))
+	cmd := session.RawCommand()
+	if cmd == "init" {
+		id := shortid.MustGenerate()
+		webhookerURL := "http://localhost:5000/" + id + "/\n"
+		session.Write([]byte(webhookerURL))
+		respCh := make(chan string)
+		h.channels[id] = respCh
+		clients.Store(id, respCh)
+		return
 	}
+
+	if len(cmd) > 0 {
+		respCh, ok := h.channels[cmd]
+		if !ok {
+			session.Write([]byte("invaild webhook id\n"))
+			return
+		}
+		for data := range respCh {
+			session.Write([]byte(data + "\n"))
+		}
+	}
+
 }
