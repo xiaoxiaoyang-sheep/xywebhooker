@@ -1,6 +1,6 @@
 run: build
-	./bin/webhooker
+	./bin/xywebhooker
 
 build:
-	go build -o ./bin/webhooker
+	go build -o ./bin/xywebhooker
 
