@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 
@@ -15,8 +17,8 @@ import (
 )
 
 type Session struct {
-	session ssh.Session
-	port    int
+	session     ssh.Session
+	destination string
 }
 
 var clients sync.Map
@@ -32,6 +34,17 @@ func (h *HttpHandler) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := value.(Session)
+	req, err := http.NewRequest(r.Method, session.destination, r.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	defer r.Body.Close()
+	io.Copy(w, resp.Body)
 }
 
 func startHTTTPServer() error {
@@ -39,6 +52,7 @@ func startHTTTPServer() error {
 	router := http.NewServeMux()
 
 	handler := &HttpHandler{}
+	router.HandleFunc("/{id}", handler.handleWebhook)
 	router.HandleFunc("/{id}/*", handler.handleWebhook)
 	return http.ListenAndServe(httpPort, router)
 }
@@ -93,13 +107,10 @@ func main() {
 }
 
 type SSHHandler struct {
-	channels map[string]chan string
 }
 
 func NewSSHHandler() *SSHHandler {
-	return &SSHHandler{
-		channels: make(map[string]chan string),
-	}
+	return &SSHHandler{}
 }
 
 func (h *SSHHandler) handleSSHSession(session ssh.Session) {
@@ -120,15 +131,19 @@ func (h *SSHHandler) handleSSHSession(session ssh.Session) {
 
 		generatedPort := randomPort()
 		id := shortid.MustGenerate()
+		destination, err := url.Parse(input)
+		if err != nil {
+			log.Fatal(err)
+		}
+		host := destination.Host
 		internalSession := Session{
-			session: session,
-			port:    generatedPort,
+			session:     session,
+			destination: destination.String(),
 		}
 		clients.Store(id, internalSession)
 
-		// http://webhooker.com/dsfadsaadsfgg
-		webhookURL := fmt.Sprintf("http://localhost:5000/%s/", id)
-		command := fmt.Sprintf("\nGenerated webhook: %s\n\nCommand to copy:\nssh -R 127.0.0.1:%d:%s localhost -p 2222 tunnel\n", webhookURL, generatedPort, input)
+		webhookURL := fmt.Sprintf("http://localhost:5000/%s", id)
+		command := fmt.Sprintf("\nGenerated webhook: %s\n\nCommand to copy:\nssh -R 127.0.0.1:%d:%s localhost -p 2222 tunnel\n", webhookURL, generatedPort, host)
 		term.Write([]byte(command))
 		return
 	}
