@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -91,8 +92,15 @@ func (h *SSHHandler) handleSSHSession(session ssh.Session) {
 	cmd := session.RawCommand()
 	if cmd == "init" {
 		id := shortid.MustGenerate()
-		webhookerURL := "http://localhost:5000/" + id + "/\n"
-		session.Write([]byte(webhookerURL))
+		fmt.Println("new init id channel ", id)
+		webhookerURL := "http://localhost:5000/" + id + "/\n\n"
+		resp := fmt.Sprintf(`%swebhook url: %sssh localhost -p 2222 %s | while IFS= read  -r line; do echo "$line" | curl -X POST -H "Content-Type: application/json" -d @- http://localhost:3000/payment/webhook; done%s`,
+			"\n",
+			webhookerURL,
+			id,
+			"\n\n",
+		)
+		session.Write([]byte(resp))
 		respCh := make(chan string)
 		h.channels[id] = respCh
 		clients.Store(id, respCh)
